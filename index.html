@@ -25,14 +25,14 @@
 <script>
     // 使用环境变量注入凭证
     const config = {
-        mapboxToken: process.env.ENV_MAPBOX_TOKEN,
-        supabaseUrl: process.env.ENV_SUPABASE_URL,
-        supabaseKey: process.env.ENV_SUPABASE_KEY,
-        r2Endpoint: process.env.ENV_R2_ENDPOINT,
-        r2AccessKey: process.env.ENV_R2_ACCESS_KEY,
-        r2SecretKey: process.env.ENV_R2_SECRET_KEY,
-        r2PublicUrl: process.env.ENV_R2_PUBLIC_URL,
-        r2Bucket: process.env.ENV_R2_BUCKET_NAME
+        mapboxToken: 'pk.eyJ1IjoibTR1MmkiLCJhIjoiY21yajV5dW1pMXk5ajJ6cno2MG9uOGpzOSJ9.gkwS48J4kiJPsrahuWmBoQ',
+        supabaseUrl: 'https://wetlwqgqjgjjwdtixkrv.supabase.co',
+        supabaseKey: 'sb_publishable_1G54HWWr0cQD9mkICGFvig_gKnx_w2w',
+        r2Endpoint: 'https://541484c5eafbd3c7af121181490891d3.r2.cloudflarestorage.com',
+        r2AccessKey: '8ad99951b3b4fb04b5400b609eed2c9b',
+        r2SecretKey: 'e6a2b1d6ddfe043abc9a083c0f8da273cb5723c8c2b9483cb44d7f52c4330092',
+        r2PublicUrl: 'https://pub-f4742f96554a43cda5aaad4ca7e8f4d6.r2.dev',
+        r2Bucket:'memories'
     };
 
     mapboxgl.accessToken = config.mapboxToken;
