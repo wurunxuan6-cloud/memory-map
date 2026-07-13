@@ -10,26 +10,47 @@
     <style>
         body { margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #050505; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        #navbar { position: absolute; top: 20px; left: 20px; z-index: 10; background: rgba(255, 255, 255, 0.9); padding: 10px 20px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; gap: 15px; }
-        .btn { cursor: pointer; padding: 8px 16px; border-radius: 20px; border: none; font-weight: bold; }
-        #admin-panel { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 400px; background: white; z-index: 20; padding: 20px; overflow-y: auto; }
+        
+        /* 左上角操作面板 */
+        #control-panel { position: absolute; top: 20px; left: 20px; z-index: 10; background: rgba(255, 255, 255, 0.95); padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 10px; width: 300px; }
+        .input-box { padding: 8px; border: 1px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; }
+        .btn { cursor: pointer; padding: 10px; border-radius: 6px; border: none; font-weight: bold; background: #1890ff; color: white; transition: 0.3s; }
+        .btn:hover { background: #40a9ff; }
+        .btn-secondary { background: #fff; color: #333; border: 1px solid #ddd; }
+        .btn-secondary:hover { background: #f0f0f0; }
+        
+        /* 照片墙侧边栏 */
+        #admin-panel { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 380px; background: white; z-index: 20; padding: 20px; overflow-y: auto; box-shadow: -2px 0 15px rgba(0,0,0,0.1); }
+        .memory-card { border-bottom: 1px solid #eee; padding: 15px 0; }
+        .memory-img { width: 100%; border-radius: 8px; margin-top: 10px; background: #f5f5f5; object-fit: cover; }
     </style>
 </head>
 <body>
-<div id="navbar">
-    <button id="toggle-edit" class="btn">✏️ 开启打点</button>
-    <button id="open-admin" class="btn">⚙️ 照片墙</button>
+
+<div id="control-panel">
+    <h3 style="margin: 0 0 10px 0;">📍 添加新足迹</h3>
+    <input type="text" id="address-input" class="input-box" placeholder="输入你想去的地址 (如: 巴黎铁塔)">
+    <input type="file" id="photo-input" class="input-box" accept="image/*">
+    <button id="submit-btn" class="btn">🚀 飞往并上传打卡</button>
+    <button id="open-admin" class="btn btn-secondary">🖼️ 打开照片墙</button>
 </div>
+
 <div id="admin-panel">
-    <h3>回忆管理</h3>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">我们的照片墙</h2>
+        <button id="close-admin" class="btn btn-secondary" style="padding: 5px 10px;">关闭</button>
+    </div>
     <div id="admin-list"></div>
-    <button id="close-admin">关闭</button>
 </div>
+
 <div id="map"></div>
+
 <script>
-    // 你的配置信息（完全保留）
+    // ==========================================
+    // 1. 已自动为你填入所有真实配置信息
+    // ==========================================
     const config = {
-        mapboxToken: 'pk.eyJ1IjoibTR1MmkiLCJhIjoiY21yajV5dW1pMXk5ajJ6cno2MG9uOGpzOSJ9.gkwS48J4kiJPsrahuWmBoQ',
+        mapboxToken: 'pk.eyJ1IjoibTR1MmkiLCJhIjoiY21yajV5dW1pMXk5ajJ6cno2MG9uOGpzOSJ9.gkwS48J4kiJPsrahuWmBoQ', 
         supabaseUrl: 'https://wetlwqgqjgjjwdtixkrv.supabase.co',
         supabaseKey: 'sb_publishable_1G54HWWr0cQD9mkICGFvig_gKnx_w2w',
         r2Endpoint: 'https://541484c5eafbd3c7af121181490891d3.r2.cloudflarestorage.com',
@@ -39,86 +60,132 @@
         r2Bucket: 'memories'
     };
 
+    // ==========================================
+    // 2. 初始化服务
+    // ==========================================
     mapboxgl.accessToken = config.mapboxToken;
     const supabaseClient = supabase.createClient(config.supabaseUrl, config.supabaseKey);
+    
     AWS.config.update({ accessKeyId: config.r2AccessKey, secretAccessKey: config.r2SecretKey });
     const s3 = new AWS.S3({ endpoint: config.r2Endpoint, signatureVersion: 'v4', s3ForcePathStyle: true });
 
-    // 初始化地图
-    const map = new mapboxgl.Map({ 
-        container: 'map', 
-        style: 'mapbox://styles/mapbox/satellite-streets-v12', 
-        center: [100, 30], 
-        zoom: 2 
+    const map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/satellite-streets-v12',
+        center: [100, 30],
+        zoom: 2,
+        projection: 'globe' // 开启炫酷的地球模式
     });
+    
+    map.on('style.load', () => { map.setFog({}); }); // 开启地球大气层边缘效果
+
+    let currentMarkers = [];
 
     // ==========================================
-    // 以下是帮你补齐的“后续业务逻辑”，没有它们按钮点不动
+    // 3. 核心功能实现
     // ==========================================
 
-    let currentMarkers = []; // 记录地图上的标记
-
-    // 1. 读取数据库，把红点显示在地图上
+    // 加载数据与照片墙
     async function loadPoints() {
-        const { data, error } = await supabaseClient.from('journey_points').select('*');
-        if (error) {
-            console.error("加载数据失败:", error);
-            return;
-        }
+        const { data, error } = await supabaseClient.from('journey_points').select('*').order('id', { ascending: false });
+        if (error) return console.error("加载失败:", error);
 
-        // 清理旧标记
         currentMarkers.forEach(m => m.remove());
         currentMarkers = [];
         const adminList = document.getElementById('admin-list');
         adminList.innerHTML = '';
 
         data.forEach(point => {
-            // 在地图上加点
+            // 地图打点
             const marker = new mapboxgl.Marker({ color: '#ff4d4f' })
                 .setLngLat([point.lng, point.lat])
-                .setPopup(new mapboxgl.Popup().setText(point.title))
+                .setPopup(new mapboxgl.Popup().setHTML(`<h4>${point.title}</h4>`))
                 .addTo(map);
             currentMarkers.push(marker);
 
-            // 在照片墙面板里加文字记录
-            adminList.innerHTML += `<p>📍 <strong>${point.title}</strong></p>`;
+            // 照片墙渲染
+            let imgHtml = point.image_url ? `<img src="${point.image_url}" class="memory-img" alt="回忆照片">` : '';
+            adminList.innerHTML += `
+                <div class="memory-card">
+                    <h3 style="margin: 0 0 5px 0;">📍 ${point.title}</h3>
+                    <p style="margin: 0; color: #888; font-size: 12px;">经纬度: ${point.lng.toFixed(2)}, ${point.lat.toFixed(2)}</p>
+                    ${imgHtml}
+                </div>
+            `;
         });
     }
 
-    // 地图加载完后自动拉取数据
     map.on('load', loadPoints);
 
-    // 2. 开启/关闭打点功能
-    let isEditing = false;
-    document.getElementById('toggle-edit').addEventListener('click', (e) => {
-        isEditing = !isEditing;
-        e.target.innerText = isEditing ? '🛑 停止打点' : '✏️ 开启打点';
-        alert(isEditing ? "打点已开启！直接点击地图记录位置。" : "打点已关闭。");
-    });
+    // 搜索、飞跃、上传与打卡综合逻辑
+    document.getElementById('submit-btn').addEventListener('click', async () => {
+        const address = document.getElementById('address-input').value;
+        const fileInput = document.getElementById('photo-input');
+        const file = fileInput.files[0];
 
-    // 3. 点击地图触发保存
-    map.on('click', async (e) => {
-        if (!isEditing) return; // 如果没开启打点，点地图没反应
+        if (!address) return alert("请输入一个地址！");
         
-        const title = prompt("输入这个地点的名字:");
-        if (!title) return; 
+        const btn = document.getElementById('submit-btn');
+        btn.innerText = "⏳ 正在搜索地址...";
+        btn.disabled = true;
 
-        const { lng, lat } = e.lngLat;
-        
-        // 存入 Supabase
-        const { error } = await supabaseClient
-            .from('journey_points')
-            .insert([{ title: title, lng: lng, lat: lat, description: '打卡记录' }]);
+        try {
+            // 步骤1：调用 Mapbox API 获取经纬度
+            const geoRes = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${config.mapboxToken}&limit=1`);
+            const geoData = await geoRes.json();
+            
+            if (!geoData.features || geoData.features.length === 0) {
+                throw new Error("找不到这个地址，请换个关键词试试");
+            }
+            
+            const coords = geoData.features[0].center; // [lng, lat]
+            const placeName = geoData.features[0].text; // 提取标准地名
 
-        if (error) {
-            alert("保存失败: " + error.message);
-        } else {
-            alert("保存成功！");
-            loadPoints(); // 刷新地图上的点
+            // 步骤2：地球飞跃动画
+            map.flyTo({ center: coords, zoom: 12, speed: 1.5, curve: 1.5 });
+
+            // 步骤3：如果有照片，上传到 R2
+            let imageUrl = null;
+            if (file) {
+                btn.innerText = "⏳ 正在上传照片...";
+                const fileName = `${Date.now()}_${file.name}`;
+                const uploadParams = {
+                    Bucket: config.r2Bucket,
+                    Key: fileName,
+                    Body: file,
+                    ContentType: file.type,
+                    ACL: 'public-read' // 确保图片可被公开访问
+                };
+                
+                await s3.upload(uploadParams).promise();
+                imageUrl = `${config.r2PublicUrl}/${fileName}`;
+            }
+
+            // 步骤4：将数据存入 Supabase
+            btn.innerText = "⏳ 正在生成记录...";
+            const { error: dbError } = await supabaseClient
+                .from('journey_points')
+                .insert([{ title: placeName || address, lng: coords[0], lat: coords[1], image_url: imageUrl }]);
+
+            if (dbError) throw dbError;
+
+            alert("🎉 打卡成功！");
+            
+            // 清空输入框并刷新
+            document.getElementById('address-input').value = '';
+            fileInput.value = '';
+            loadPoints();
+
+        } catch (err) {
+            alert("发生错误: " + err.message);
+            console.error(err);
+        } finally {
+            btn.innerText = "🚀 飞往并上传打卡";
+            btn.disabled = false;
         }
     });
 
-    // 4. 照片墙面板的开关
+    // 照片墙面板交互
     document.getElementById('open-admin').addEventListener('click', () => {
         document.getElementById('admin-panel').style.display = 'block';
     });
