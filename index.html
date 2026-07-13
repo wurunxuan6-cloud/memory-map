@@ -20,10 +20,14 @@
     <button id="toggle-edit" class="btn">✏️ 开启打点</button>
     <button id="open-admin" class="btn">⚙️ 照片墙</button>
 </div>
-<div id="admin-panel"><h3>回忆管理</h3><div id="admin-list"></div><button id="close-admin">关闭</button></div>
+<div id="admin-panel">
+    <h3>回忆管理</h3>
+    <div id="admin-list"></div>
+    <button id="close-admin">关闭</button>
+</div>
 <div id="map"></div>
 <script>
-    // 使用环境变量注入凭证
+    // 你的配置信息（完全保留）
     const config = {
         mapboxToken: 'pk.eyJ1IjoibTR1MmkiLCJhIjoiY21yajV5dW1pMXk5ajJ6cno2MG9uOGpzOSJ9.gkwS48J4kiJPsrahuWmBoQ',
         supabaseUrl: 'https://wetlwqgqjgjjwdtixkrv.supabase.co',
@@ -32,7 +36,7 @@
         r2AccessKey: '8ad99951b3b4fb04b5400b609eed2c9b',
         r2SecretKey: 'e6a2b1d6ddfe043abc9a083c0f8da273cb5723c8c2b9483cb44d7f52c4330092',
         r2PublicUrl: 'https://pub-f4742f96554a43cda5aaad4ca7e8f4d6.r2.dev',
-        r2Bucket:'memories'
+        r2Bucket: 'memories'
     };
 
     mapboxgl.accessToken = config.mapboxToken;
@@ -40,9 +44,87 @@
     AWS.config.update({ accessKeyId: config.r2AccessKey, secretAccessKey: config.r2SecretKey });
     const s3 = new AWS.S3({ endpoint: config.r2Endpoint, signatureVersion: 'v4', s3ForcePathStyle: true });
 
-    // 初始化地图与逻辑 (此处省略部分业务逻辑代码，保持结构完整)
-    const map = new mapboxgl.Map({ container: 'map', style: 'mapbox://styles/mapbox/satellite-streets-v12', center: [100, 30], zoom: 2 });
-    // ... 后续逻辑与此前一致
+    // 初始化地图
+    const map = new mapboxgl.Map({ 
+        container: 'map', 
+        style: 'mapbox://styles/mapbox/satellite-streets-v12', 
+        center: [100, 30], 
+        zoom: 2 
+    });
+
+    // ==========================================
+    // 以下是帮你补齐的“后续业务逻辑”，没有它们按钮点不动
+    // ==========================================
+
+    let currentMarkers = []; // 记录地图上的标记
+
+    // 1. 读取数据库，把红点显示在地图上
+    async function loadPoints() {
+        const { data, error } = await supabaseClient.from('journey_points').select('*');
+        if (error) {
+            console.error("加载数据失败:", error);
+            return;
+        }
+
+        // 清理旧标记
+        currentMarkers.forEach(m => m.remove());
+        currentMarkers = [];
+        const adminList = document.getElementById('admin-list');
+        adminList.innerHTML = '';
+
+        data.forEach(point => {
+            // 在地图上加点
+            const marker = new mapboxgl.Marker({ color: '#ff4d4f' })
+                .setLngLat([point.lng, point.lat])
+                .setPopup(new mapboxgl.Popup().setText(point.title))
+                .addTo(map);
+            currentMarkers.push(marker);
+
+            // 在照片墙面板里加文字记录
+            adminList.innerHTML += `<p>📍 <strong>${point.title}</strong></p>`;
+        });
+    }
+
+    // 地图加载完后自动拉取数据
+    map.on('load', loadPoints);
+
+    // 2. 开启/关闭打点功能
+    let isEditing = false;
+    document.getElementById('toggle-edit').addEventListener('click', (e) => {
+        isEditing = !isEditing;
+        e.target.innerText = isEditing ? '🛑 停止打点' : '✏️ 开启打点';
+        alert(isEditing ? "打点已开启！直接点击地图记录位置。" : "打点已关闭。");
+    });
+
+    // 3. 点击地图触发保存
+    map.on('click', async (e) => {
+        if (!isEditing) return; // 如果没开启打点，点地图没反应
+        
+        const title = prompt("输入这个地点的名字:");
+        if (!title) return; 
+
+        const { lng, lat } = e.lngLat;
+        
+        // 存入 Supabase
+        const { error } = await supabaseClient
+            .from('journey_points')
+            .insert([{ title: title, lng: lng, lat: lat, description: '打卡记录' }]);
+
+        if (error) {
+            alert("保存失败: " + error.message);
+        } else {
+            alert("保存成功！");
+            loadPoints(); // 刷新地图上的点
+        }
+    });
+
+    // 4. 照片墙面板的开关
+    document.getElementById('open-admin').addEventListener('click', () => {
+        document.getElementById('admin-panel').style.display = 'block';
+    });
+    document.getElementById('close-admin').addEventListener('click', () => {
+        document.getElementById('admin-panel').style.display = 'none';
+    });
 </script>
 </body>
 </html>
