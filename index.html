@@ -10,22 +10,26 @@
     <style>
         body { margin: 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #050505; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        /* 左上角操作面板 */
         #control-panel { position: absolute; top: 20px; left: 20px; z-index: 10; background: rgba(255, 255, 255, 0.95); padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 10px; width: 300px; }
         .input-box { padding: 8px; border: 1px solid #ccc; border-radius: 6px; width: 100%; box-sizing: border-box; }
         .btn { cursor: pointer; padding: 10px; border-radius: 6px; border: none; font-weight: bold; background: #1890ff; color: white; transition: 0.3s; }
         .btn:hover { background: #40a9ff; }
         .btn-secondary { background: #fff; color: #333; border: 1px solid #ddd; }
         .btn-secondary:hover { background: #f0f0f0; }
-        #admin-panel { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 380px; background: white; z-index: 20; padding: 20px; overflow-y: auto; }
+        
+        /* 照片墙侧边栏 */
+        #admin-panel { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 380px; background: white; z-index: 20; padding: 20px; overflow-y: auto; box-shadow: -2px 0 15px rgba(0,0,0,0.1); }
         .memory-card { border-bottom: 1px solid #eee; padding: 15px 0; }
-        .memory-img { width: 100%; border-radius: 8px; margin-top: 10px; }
+        .memory-img { width: 100%; border-radius: 8px; margin-top: 10px; background: #f5f5f5; object-fit: cover; }
     </style>
 </head>
 <body>
 
 <div id="control-panel">
     <h3 style="margin: 0 0 10px 0;">📍 添加新足迹</h3>
-    <input type="text" id="address-input" class="input-box" placeholder="输入地址 (如: 巴黎铁塔)">
+    <input type="text" id="address-input" class="input-box" placeholder="输入你想去的地址 (如: 巴黎铁塔)">
     <input type="file" id="photo-input" class="input-box" accept="image/*">
     <button id="submit-btn" class="btn">🚀 飞往并上传打卡</button>
     <button id="open-admin" class="btn btn-secondary">🖼️ 打开照片墙</button>
@@ -34,7 +38,7 @@
 <div id="admin-panel">
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <h2 style="margin: 0;">我们的照片墙</h2>
-        <button id="close-admin" class="btn btn-secondary">关闭</button>
+        <button id="close-admin" class="btn btn-secondary" style="padding: 5px 10px;">关闭</button>
     </div>
     <div id="admin-list"></div>
 </div>
@@ -42,6 +46,9 @@
 <div id="map"></div>
 
 <script>
+    // ==========================================
+    // 1. 已自动为你填入所有真实配置信息
+    // ==========================================
     const config = {
         mapboxToken: 'pk.eyJ1IjoibTR1MmkiLCJhIjoiY21yajV5dW1pMXk5ajJ6cno2MG9uOGpzOSJ9.gkwS48J4kiJPsrahuWmBoQ', 
         supabaseUrl: 'https://wetlwqgqjgjjwdtixkrv.supabase.co',
@@ -53,8 +60,12 @@
         r2Bucket: 'memories'
     };
 
+    // ==========================================
+    // 2. 初始化服务
+    // ==========================================
     mapboxgl.accessToken = config.mapboxToken;
     const supabaseClient = supabase.createClient(config.supabaseUrl, config.supabaseKey);
+    
     AWS.config.update({ accessKeyId: config.r2AccessKey, secretAccessKey: config.r2SecretKey });
     const s3 = new AWS.S3({ endpoint: config.r2Endpoint, signatureVersion: 'v4', s3ForcePathStyle: true });
 
@@ -63,51 +74,124 @@
         style: 'mapbox://styles/mapbox/satellite-streets-v12',
         center: [100, 30],
         zoom: 2,
-        projection: 'globe'
+        projection: 'globe' // 开启炫酷的地球模式
     });
+    
+    map.on('style.load', () => { map.setFog({}); }); // 开启地球大气层边缘效果
 
+    let currentMarkers = [];
+
+    // ==========================================
+    // 3. 核心功能实现
+    // ==========================================
+
+    // 加载数据与照片墙
     async function loadPoints() {
-        const { data } = await supabaseClient.from('journey_points').select('*').order('id', { ascending: false });
-        if (!data) return;
+        const { data, error } = await supabaseClient.from('journey_points').select('*').order('id', { ascending: false });
+        if (error) return console.error("加载失败:", error);
+
+        currentMarkers.forEach(m => m.remove());
+        currentMarkers = [];
         const adminList = document.getElementById('admin-list');
         adminList.innerHTML = '';
+
         data.forEach(point => {
-            new mapboxgl.Marker({ color: '#ff4d4f' }).setLngLat([point.lng, point.lat]).addTo(map);
-            adminList.innerHTML += `<div class="memory-card"><h3>📍 ${point.title}</h3>${point.image_url ? `<img src="${point.image_url}" class="memory-img">` : ''}</div>`;
+            // 地图打点
+            const marker = new mapboxgl.Marker({ color: '#ff4d4f' })
+                .setLngLat([point.lng, point.lat])
+                .setPopup(new mapboxgl.Popup().setHTML(`<h4>${point.title}</h4>`))
+                .addTo(map);
+            currentMarkers.push(marker);
+
+            // 照片墙渲染
+            let imgHtml = point.image_url ? `<img src="${point.image_url}" class="memory-img" alt="回忆照片">` : '';
+            adminList.innerHTML += `
+                <div class="memory-card">
+                    <h3 style="margin: 0 0 5px 0;">📍 ${point.title}</h3>
+                    <p style="margin: 0; color: #888; font-size: 12px;">经纬度: ${point.lng.toFixed(2)}, ${point.lat.toFixed(2)}</p>
+                    ${imgHtml}
+                </div>
+            `;
         });
     }
 
     map.on('load', loadPoints);
 
+    // 搜索、飞跃、上传与打卡综合逻辑
     document.getElementById('submit-btn').addEventListener('click', async () => {
         const address = document.getElementById('address-input').value;
-        const file = document.getElementById('photo-input').files[0];
-        if (!address) return alert("请输入地址！");
+        const fileInput = document.getElementById('photo-input');
+        const file = fileInput.files[0];
+
+        if (!address) return alert("请输入一个地址！");
+        
         const btn = document.getElementById('submit-btn');
-        btn.innerText = "处理中..."; btn.disabled = true;
+        btn.innerText = "⏳ 正在搜索地址...";
+        btn.disabled = true;
 
         try {
+            // 步骤1：调用 Mapbox API 获取经纬度
             const geoRes = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${config.mapboxToken}&limit=1`);
             const geoData = await geoRes.json();
-            const coords = geoData.features[0].center;
-            map.flyTo({ center: coords, zoom: 12 });
+            
+            if (!geoData.features || geoData.features.length === 0) {
+                throw new Error("找不到这个地址，请换个关键词试试");
+            }
+            
+            const coords = geoData.features[0].center; // [lng, lat]
+            const placeName = geoData.features[0].text; // 提取标准地名
 
+            // 步骤2：地球飞跃动画
+            map.flyTo({ center: coords, zoom: 12, speed: 1.5, curve: 1.5 });
+
+            // 步骤3：如果有照片，上传到 R2
             let imageUrl = null;
             if (file) {
+                btn.innerText = "⏳ 正在上传照片...";
                 const fileName = `${Date.now()}_${file.name}`;
-                await s3.upload({ Bucket: config.r2Bucket, Key: fileName, Body: file, ContentType: file.type, ACL: 'public-read' }).promise();
+                const uploadParams = {
+                    Bucket: config.r2Bucket,
+                    Key: fileName,
+                    Body: file,
+                    ContentType: file.type,
+                    ACL: 'public-read' // 确保图片可被公开访问
+                };
+                
+                await s3.upload(uploadParams).promise();
                 imageUrl = `${config.r2PublicUrl}/${fileName}`;
             }
 
-            await supabaseClient.from('journey_points').insert([{ title: address, lng: coords[0], lat: coords[1], image_url: imageUrl }]);
-            alert("成功！");
+            // 步骤4：将数据存入 Supabase
+            btn.innerText = "⏳ 正在生成记录...";
+            const { error: dbError } = await supabaseClient
+                .from('journey_points')
+                .insert([{ title: placeName || address, lng: coords[0], lat: coords[1], image_url: imageUrl }]);
+
+            if (dbError) throw dbError;
+
+            alert("🎉 打卡成功！");
+            
+            // 清空输入框并刷新
+            document.getElementById('address-input').value = '';
+            fileInput.value = '';
             loadPoints();
-        } catch (err) { alert("出错，请检查网络: " + err.message); }
-        btn.innerText = "🚀 飞往并上传打卡"; btn.disabled = false;
+
+        } catch (err) {
+            alert("发生错误: " + err.message);
+            console.error(err);
+        } finally {
+            btn.innerText = "🚀 飞往并上传打卡";
+            btn.disabled = false;
+        }
     });
 
-    document.getElementById('open-admin').addEventListener('click', () => document.getElementById('admin-panel').style.display = 'block');
-    document.getElementById('close-admin').addEventListener('click', () => document.getElementById('admin-panel').style.display = 'none');
+    // 照片墙面板交互
+    document.getElementById('open-admin').addEventListener('click', () => {
+        document.getElementById('admin-panel').style.display = 'block';
+    });
+    document.getElementById('close-admin').addEventListener('click', () => {
+        document.getElementById('admin-panel').style.display = 'none';
+    });
 </script>
 </body>
 </html>
